@@ -1,0 +1,305 @@
+---
+title: "Project"
+author: "Eddy Qiyang Liu"
+date: "2024-04-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(GGally)
+library(keras)
+library(stringr)
+
+```
+
+```{r}
+data.raw <- read.csv("final_final.csv")
+unique(data.raw$Mode)
+data.onehot <- data.raw%>%
+  mutate(Mode = ifelse(Mode == "Major", 1, 0))%>%
+  select(-"Lyrics")
+names(data.onehot)
+```
+
+```{r}
+data.full <- data.onehot %>%
+  select(Title, Artist, Genre, Acousticness:Tempo, Time.Signature, Key, Mode) %>%
+  na.omit() %>%
+  mutate(across(.cols = 4:last_col(), .fns = scale))
+```
+
+```{r}
+set.seed(565)
+train_indices <- sample(seq_len(nrow(data.full)), size = floor(0.8 * nrow(data.full)))
+
+training_data <- data.full[train_indices, ]
+testing_data <- data.full[-train_indices, ]
+```
+
+```{r}
+write.csv(testing_data, "testing_data.csv", row.names = FALSE)
+```
+
+```{r}
+normalized_train <- training_data%>%
+  select(Acousticness:Tempo, Time.Signature, Key, Mode)%>%
+  as.matrix()
+
+normalized_test <- testing_data%>%
+  select(Acousticness:Tempo, Time.Signature, Key, Mode)%>%
+  as.matrix()
+```
+
+```{r,echo = F}
+keras::k_clear_session()
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 64, activation = 'relu', input_shape = ncol(normalized_train)) %>%
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 16, activation = 'relu') %>%
+  layer_dense(units = 8, activation = 'linear') %>%
+  layer_dense(units = 12, activation = 'linear')
+
+# Print the model summary
+summary(model)
+
+model %>% compile(
+  loss = 'mse',
+  optimizer = optimizer_adam()
+)
+
+history <- model %>% fit(
+  normalized_train,
+  normalized_train,
+  epochs = 1000,
+  batch_size = 32,
+  validation_split = 0.2,
+  validation_data = list(
+    normalized_test,
+    normalized_test
+    ),
+  verbose = 1
+)
+```
+
+```{r}
+encoder_model <- keras_model(inputs = model$input, outputs = get_layer(model, index = 4)$output)
+
+latent_space <- predict(encoder_model, normalized_test)
+```
+
+```{r}
+# Define a helper function to check if any specified genres are present in the genre string
+matches_any_genre <- function(genre_string, genres) {
+  any(sapply(genres, function(genre) grepl(genre, genre_string, ignore.case = TRUE)))
+}
+
+# Find all songs with R&B, alternative metal, or soul
+songs_rnb_metal_soul <- testing_data[sapply(testing_data$Genre, matches_any_genre, genres = c("R&B", "alternative metal", "soul")), ]
+
+# Find all songs with dance pop or EDM
+songs_pop_edm <- testing_data[sapply(testing_data$Genre, matches_any_genre, genres = c("dance pop", "EDM")), ]
+
+# Output the filtered data frames
+list(
+  Songs_RnB_Metal_Soul = songs_rnb_metal_soul,
+  Songs_Pop_EDM = songs_pop_edm
+)
+```
+
+```{r}
+# With overlaps
+num_songs <- 30
+
+set.seed(565)
+UserA <- songs_rnb_metal_soul[sample(nrow(songs_rnb_metal_soul), num_songs), ]
+UserB <- songs_rnb_metal_soul[sample(nrow(songs_rnb_metal_soul), num_songs), ]
+
+UserC <- songs_pop_edm[sample(nrow(songs_pop_edm), num_songs), ]
+UserD <- songs_pop_edm[sample(nrow(songs_pop_edm), num_songs), ]
+
+# Output the data for each user
+list(
+  User_A = UserA,
+  User_B = UserB,
+  User_C = UserC,
+  User_D = UserD
+)
+```
+
+```{r, eval = F}
+# Overlap removed
+set.seed(565)
+UserA_index <- sample(nrow(songs_rnb_metal_soul), nrow(songs_rnb_metal_soul)/2)
+UserA <- songs_rnb_metal_soul[UserA_index, ]
+UserB <- songs_rnb_metal_soul[-UserA_index, ]
+
+UserC_index <- sample(nrow(songs_pop_edm), nrow(songs_pop_edm)/2)
+UserC <- songs_pop_edm[UserC_index, ]
+UserD <- songs_pop_edm[-UserC_index, ]
+
+# Collect all song titles from Users A and B
+songs_ab_titles <- unique(c(UserA$Title, UserB$Title))
+
+# Filter out these songs from Users C and D selections
+UserC <- UserC[!UserC$Title %in% songs_ab_titles, ]
+UserD <- UserD[!UserD$Title %in% songs_ab_titles, ]
+
+# Output the data for each user after removing overlaps
+list(
+  User_A = UserA,
+  User_B = UserB,
+  User_C = UserC,
+  User_D = UserD
+)
+
+```
+
+```{r}
+playlist_encode <- function(metadata, scaled_features){
+  latent.image <- predict(encoder_model, as.matrix(scaled_features))
+  playlist <- cbind(metadata, as.data.frame(latent.image))
+  return(playlist)
+}
+
+user_image <- function(features){
+  latent.image <- predict(encoder_model, as.matrix(features))
+  latent.avg <- colMeans(latent.image)
+  return(latent.avg)
+}
+
+cosine_similarity <- function(vector1, vector2) {
+  dot_product <- sum(vector1 * vector2)
+  norm_vector1 <- sqrt(sum(vector1^2))
+  norm_vector2 <- sqrt(sum(vector2^2))
+  cosine_similarity <- dot_product / (norm_vector1 * norm_vector2)
+  return(cosine_similarity)
+}
+
+
+#UserA.latent <- playlist_encode(UserA[,1:3], UserA[,4:ncol(UserA)])
+UserA.image <- user_image(UserA[,4:ncol(UserA)])
+UserB.image <- user_image(UserB[,4:ncol(UserB)])
+UserC.image <- user_image(UserC[,4:ncol(UserC)])
+UserD.image <- user_image(UserD[,4:ncol(UserD)])
+
+UserA.image
+UserB.image
+UserC.image
+UserD.image
+```
+
+```{r, warning=F}
+users <- list(User_A = UserA, User_B = UserB, User_C = UserC, User_D = UserD)
+names(users) <- c("UserA", "UserB", "UserC", "UserD")
+
+# Create a matrix to store the overlap counts
+results <- matrix(nrow = length(users), ncol = length(users),
+                  dimnames = list(names(users), names(users)))
+
+# Function to calculate overlap
+calculate_overlap <- function(user1, user2) {
+  length(intersect(user1$Title, user2$Title))  # Assuming 'Title' uniquely identifies a song
+}
+
+# Calculate the overlap for every combination
+for (i in seq_along(users)) {
+  for (j in i:seq_along(users)) {
+    if (i == j) {
+      results[i, j] <- nrow(users[[i]])  # The overlap of a user with themselves is the total number of their songs
+    } else {
+      overlap_count <- calculate_overlap(users[[i]], users[[j]])
+      results[i, j] <- overlap_count
+      results[j, i] <- overlap_count  # Overlap count is symmetric
+    }
+  }
+}
+
+# Print the results matrix
+print(results)
+```
+
+```{r}
+user_images <- list(
+  UserA = UserA.image,
+  UserB = UserB.image,
+  UserC = UserC.image,
+  UserD = UserD.image
+)
+
+results <- matrix(nrow = length(user_images), ncol = length(user_images),
+                  dimnames = list(names(user_images), names(user_images)))
+
+# Calculate the cosine similarity for every combination
+for (i in 1:length(user_images)) {
+  for (j in i:length(user_images)) {
+    if (i == j) {
+      results[i, j] <- 1  # The similarity of a vector with itself is always 1
+    } else {
+      sim <- cosine_similarity(user_images[[i]], user_images[[j]])
+      results[i, j] <- sim
+      results[j, i] <- sim  # Since cosine similarity is symmetric
+    }
+  }
+}
+
+# Print the results matrix
+print(results)
+```
+
+```{r}
+recommend_top_unheard <- function(main.playlist, main.image, alt.playlist, n_songs) {
+  main.playlist.latent <- playlist_encode(main.playlist[, 1:3], main.playlist[,4:ncol(main.playlist)])
+  alt.playlist.latent <- playlist_encode(alt.playlist[, 1:3], alt.playlist[,4:ncol(alt.playlist)])
+  unheard.playlist.latent <- anti_join(alt.playlist.latent, main.playlist.latent, by = "Title")
+  
+  unheard.playlist.latent$Score <- apply(unheard.playlist.latent[,4:ncol(alt.playlist.latent)], 1, function(row) cosine_similarity(row, main.image))
+  
+  top_songs <- unheard.playlist.latent %>%
+    arrange(desc(Score)) %>%
+    slice_head(n = n_songs) %>%
+    select(Title, Artist, Genre, Score)
+  
+  return(top_songs)
+}
+
+
+BtoA <- recommend_top_unheard(UserA, UserA.image, UserB, 5); BtoA
+DtoA <- recommend_top_unheard(UserA, UserA.image, UserD, 5); DtoA
+CtoA <- recommend_top_unheard(UserA, UserA.image, UserC, 5); CtoA
+recommend_top_unheard(UserC, UserC.image, UserD, 5)
+recommend_top_unheard(UserC, UserC.image, UserA, 5)
+```
+
+```{r}
+recommend_top_all <- function(main.playlist, main.image, alt.playlist, n_songs) {
+  main.playlist.latent <- playlist_encode(main.playlist[, 1:3], main.playlist[,4:ncol(main.playlist)])
+  alt.playlist.latent <- playlist_encode(alt.playlist[, 1:3], alt.playlist[,4:ncol(alt.playlist)])
+
+  alt.playlist.latent$Score <- apply(alt.playlist.latent[,4:ncol(alt.playlist.latent)], 1, function(row) cosine_similarity(row, main.image))
+  
+  top_songs <- alt.playlist.latent %>%
+    arrange(desc(Score)) %>%
+    slice_head(n = n_songs) %>%
+    select(Title, Artist, Genre, Score)
+  
+  return(top_songs)
+}
+
+UserA.representative_songs <- recommend_top_all(UserA, UserA.image, UserA, 5); UserA.representative_songs
+recommend_top_all(UserB, UserB.image, UserB, 5)
+recommend_top_all(UserC, UserC.image, UserC, 5)
+
+```
+
+```{r}
+from.database <- recommend_top_unheard(UserA, UserA.image, testing_data, 10)
+```
+
+```{r}
+colnames(normalized_test)
+```
+
