@@ -1,7 +1,7 @@
 ---
 title: "Project"
-author: "Eddy Qiyang Liu"
-date: "2024-04-21"
+author: "Harry Hong"
+date: "2024-12-13"
 output: html_document
 ---
 
@@ -32,7 +32,7 @@ data.full <- data.onehot %>%
 ```
 
 ```{r}
-set.seed(565)
+set.seed(562)
 train_indices <- sample(seq_len(nrow(data.full)), size = floor(0.8 * nrow(data.full)))
 
 training_data <- data.full[train_indices, ]
@@ -114,7 +114,7 @@ list(
 # With overlaps
 num_songs <- 30
 
-set.seed(565)
+set.seed(562)
 UserA <- songs_rnb_metal_soul[sample(nrow(songs_rnb_metal_soul), num_songs), ]
 UserB <- songs_rnb_metal_soul[sample(nrow(songs_rnb_metal_soul), num_songs), ]
 
@@ -132,7 +132,7 @@ list(
 
 ```{r, eval = F}
 # Overlap removed
-set.seed(565)
+set.seed(562)
 UserA_index <- sample(nrow(songs_rnb_metal_soul), nrow(songs_rnb_metal_soul)/2)
 UserA <- songs_rnb_metal_soul[UserA_index, ]
 UserB <- songs_rnb_metal_soul[-UserA_index, ]
